@@ -47,8 +47,8 @@ repo2rlenv generate \
   --llm anthropic/claude-sonnet-4-6 \
   --out ./datasets/<dataset-name>
 
-# Validate (fast structural check) and publish
-repo2rlenv validate ./datasets/<dataset-name>
+# Validate (fast structural check; --deep also checks task assets) and publish
+repo2rlenv validate ./datasets/<dataset-name> --deep
 repo2rlenv push ./datasets/<dataset-name> <your-org>/<dataset-name>
 
 # Anyone can pull + run a published dataset on a fresh machine

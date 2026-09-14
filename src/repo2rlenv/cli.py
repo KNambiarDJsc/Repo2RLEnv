@@ -2,7 +2,7 @@
 
 Subcommands:
   generate    Run a synthesis pipeline against a repo (emits to local dir)
-  validate    Validate a generated dataset directory (fast structural check)
+  validate    Validate a generated dataset directory (fast structural check; --deep for assets)
   bootstrap   Build a working Docker image via an LLM agent loop
   push        Push a local dataset directory to HF Hub
   pull        Pull a Repo2RLEnv dataset from HF Hub to a local directory
@@ -315,6 +315,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def cmd_validate(args: argparse.Namespace) -> int:
     import tomllib
 
+    from rich.markup import escape
+
+    oracle = getattr(args, "oracle", False)
+    deep = getattr(args, "deep", False) or oracle
     dataset_dir = Path(args.path).expanduser().resolve()
     task_files = sorted(dataset_dir.rglob("task.toml"))
     if not task_files:
@@ -323,9 +327,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     with console.section(f"Validating {dataset_dir}"):
         failures = 0
+        warnings = 0
         for tf in task_files:
             try:
-                data = tomllib.loads(tf.read_text())
+                data = tomllib.loads(tf.read_text(encoding="utf-8"))
             except Exception as exc:
                 console.error(f"{tf.relative_to(dataset_dir)}: cannot parse TOML: {exc}")
                 failures += 1
@@ -339,20 +344,37 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
             t = data["task"]
             if "name" not in t:
-                console.error(f"{tf.relative_to(dataset_dir)}: [task] missing name")
+                console.error(escape(f"{tf.relative_to(dataset_dir)}: [task] missing name"))
                 failures += 1
                 continue
 
+            # escape(): TOML table names like [metadata.repo2env] are Rich markup.
             r2e = data.get("metadata", {}).get("repo2env")
             if r2e is None:
-                console.warn(f"{t['name']}: missing [metadata.repo2env] — non-r2e task")
-            else:
+                console.warn(escape(f"{t['name']}: missing [metadata.repo2env] — non-r2e task"))
+            if deep:
+                from repo2rlenv.validation import validate_task
+
+                task_rel = tf.parent.relative_to(dataset_dir)
+                findings = validate_task(tf.parent, data, oracle=oracle)
+                for f in findings:
+                    line = escape(f"{t['name']}: {(task_rel / f.path).as_posix()}: {f.message}")
+                    if f.severity == "error":
+                        console.error(line)
+                    else:
+                        console.warn(line)
+                warnings += sum(f.severity == "warning" for f in findings)
+                if any(f.severity == "error" for f in findings):
+                    failures += 1
+                    continue
+            if r2e is not None:
                 console.success(t["name"])
 
+    suffix = f" ({warnings} warnings)" if warnings else ""
     if failures == 0:
-        console.success(f"all {len(task_files)} tasks valid")
+        console.success(f"all {len(task_files)} tasks valid{suffix}")
     else:
-        console.error(f"{failures}/{len(task_files)} tasks failed")
+        console.error(f"{failures}/{len(task_files)} tasks failed{suffix}")
     return 0 if failures == 0 else 1
 
 
@@ -912,6 +934,19 @@ def main(argv: list[str] | None = None) -> int:
     # validate
     v = sub.add_parser("validate", help="Validate task.toml files in a dataset")
     v.add_argument("path", help="dataset or task directory")
+    v.add_argument(
+        "--deep",
+        action="store_true",
+        help=(
+            "also check task assets + [metadata.repo2env]: instruction, test entry point, "
+            "environment definition, graded verifier files, reproducibility mode"
+        ),
+    )
+    v.add_argument(
+        "--oracle",
+        action="store_true",
+        help="--deep, plus require a usable solution/patch.diff + solve script (Repo2RLEnv tasks)",
+    )
     v.set_defaults(func=cmd_validate)
 
     # push

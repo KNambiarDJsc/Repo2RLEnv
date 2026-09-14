@@ -252,6 +252,33 @@ v0.2 adds:
 
 6. Sandbox-required tasks carry `[metadata.repo2env.reproducibility]` with `mode ∈ {registry, inline_dockerfile, local_only}`. `local_only` is pre-publication — these tasks are NOT considered reproducible by external consumers.
 
+### Deep validation
+
+`repo2rlenv validate <path>` only checks that each `task.toml` parses and names its task. `--deep` also reads each task's assets and metadata; `--oracle` implies `--deep` and adds the oracle checks. Errors fail the run (exit 1); warnings are printed but don't. Implementation: [`src/repo2rlenv/validation.py`](https://github.com/huggingface/Repo2RLEnv/blob/main/src/repo2rlenv/validation.py).
+
+| Check | Applies to | Severity |
+|---|---|---|
+| `instruction.md` exists and is non-blank | every single-step task | error |
+| An environment definition exists: `environment/Dockerfile`, `environment/docker-compose.yaml`, or `[environment].docker_image` (Harbor's own rule) | Repo2RLEnv tasks that are runnable — `test_execution` reward, or an `environment/` / `tests/` dir; any task with an `environment/` dir | error |
+| `tests/test.sh` (`tests/test.bat` when `[environment].os = "windows"`) exists and is non-blank | runnable Repo2RLEnv tasks; any task with a `tests/` dir | error |
+| `solution/patch.diff` exists and is non-blank | text-only `diff_similarity` tasks (`pr_diff` with `emit_harbor_env=False`) — it's their only oracle | error |
+| `tests/verifier.py` parses as Python; `tests/f2p.json` is a non-empty JSON list of strings; `tests/p2p.json` is a JSON list of strings | `pr_runtime` / `commit_runtime` / `cve_patches` tasks with a non-empty `fail_to_pass` (graded reward) | error |
+| `tests/f2p.json` matches `fail_to_pass` in `task.toml` | same | warning |
+| `tests/<test_filename>` exists and is non-blank | `code_instruct` / `equivalence_tests` | error |
+| `reproducibility.mode` is `registry`, `inline_dockerfile` or `local_only`; typed fields (`image_ref`, `image_visibility`, `inline_recipe_*`, …) have valid values | tasks carrying the subtable | error |
+| `registry` mode has a non-empty `image_ref`; `inline_dockerfile` mode has `environment/Dockerfile` | per mode | error |
+| `registry` mode's `FROM` line matches `image_ref` | per mode | warning |
+| `spec_version >= 0.2.0` task with `environment/Dockerfile` but no reproducibility subtable | Repo2RLEnv tasks | warning |
+| Unknown `pipeline` or `reward_kinds` entry | Repo2RLEnv tasks | warning |
+| `--oracle`: `solution/patch.diff` is a non-blank unified diff (skipped for `diff_format = "search_replace"`) and `solution/solve.sh` exists | Repo2RLEnv tasks | error |
+
+What deep validation deliberately does **not** do:
+
+- **Require `solution/`** without `--oracle` — Harbor solutions are optional.
+- **Check the executable bit** — Harbor `chmod +x`es scripts itself.
+- **Reject text-only `pr_diff` output** for lacking `environment/` and `tests/` — that's a supported shape.
+- **Prove the task runs.** It's static: it can't tell whether the Dockerfile builds, whether a shell script's dependencies exist, or whether the patch applies at `base_commit`. Pre-v0.2 datasets without a reproducibility subtable, and non-Repo2RLEnv Harbor tasks, only get the checks for assets they actually ship; multi-step `[[steps]]` tasks skip the layout checks. `harbor run --agent oracle` remains the ground truth.
+
 ## Versioning
 
 Pre-1.0 is a moving target — minor bumps may break readers. After 1.0 we honor strict SemVer (additive minors, breaking majors only). Each released spec version freezes its JSON Schema at a stable URL.
