@@ -59,7 +59,7 @@ Implementation: [`src/repo2rlenv/auth.py:resolve_github_token`](https://github.c
 |---|---|---|---|
 | `owner/name` or `https://github.com/...` | GitHub | `resolve_github_token` chain above | unchanged — the default |
 | `https://gitlab.com/owner/name` | GitLab | `repo.auth_token_env` → `$GITLAB_TOKEN` (public needs none) | clone via `oauth2:<token>@` |
-| `/abs/path`, `./rel`, `~/x`, `file://…` | Local | none (no `gh` shell-out) | canonicalized to `file://<abspath>` |
+| `/abs/path`, `./rel`, `~/x`, `file://…` (Windows: also `C:\path`, `.\rel`, UNC) | Local | none (no `gh` shell-out) | canonicalized to `file://<abspath>` |
 
 Source-aware resolution lives in [`auth.py:resolve_repo_token`](https://github.com/huggingface/Repo2RLEnv/blob/main/src/repo2rlenv/auth.py); detection + capabilities in [`sources.py`](https://github.com/huggingface/Repo2RLEnv/blob/main/src/repo2rlenv/sources.py).
 

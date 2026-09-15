@@ -207,7 +207,8 @@ auto-suppressed to WARNING while a Live is active.
 ## Input sources + auth
 
 `--repo` accepts a GitHub `owner/name`, a `gitlab.com` URL, or a local path
-(`/abs`, `./rel`, `~`, `file://` — canonicalized to `file://<abspath>`).
+(`/abs`, `./rel`, `~`, `file://`; on Windows also `C:\abs`, `.\rel`, UNC —
+canonicalized to `file://<abspath>`).
 `RepoSpec.source_kind` classifies it; `sources.py` defines a `Capability`
 (pull_requests / issues / commit_api) per source and per pipeline's
 `required_capabilities`. `cmd_generate` gates incompatible combinations up front —
