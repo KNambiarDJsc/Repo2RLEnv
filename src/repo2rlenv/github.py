@@ -52,6 +52,7 @@ def _run_gh(args: list[str], token: str | None = None) -> str:
         ["gh", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
         env=env,
         check=False,
