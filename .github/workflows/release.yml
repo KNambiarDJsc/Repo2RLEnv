@@ -31,6 +31,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows:
+    name: Windows compatibility
+    uses: ./.github/workflows/windows.yml
+    with:
+      ref: ${{ github.event.release.tag_name || inputs.tag }}
+
   # Sanity gate — run the full test suite on the release tag before we publish.
   test:
     name: Tests on release tag (py${{ matrix.python-version }})
@@ -75,7 +81,7 @@ jobs:
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-latest
-    needs: [test, tasksmith-runtimes]
+    needs: [test, tasksmith-runtimes, windows]
     outputs:
       version: ${{ steps.read-version.outputs.version }}
     steps:

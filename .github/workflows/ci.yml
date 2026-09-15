@@ -24,6 +24,10 @@ env:
   CI: "1"
 
 jobs:
+  windows:
+    name: Windows compatibility
+    uses: ./.github/workflows/windows.yml
+
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
@@ -160,7 +164,7 @@ jobs:
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-latest
-    needs: [lint, test, owned-contracts, tasksmith-runtimes]
+    needs: [lint, test, owned-contracts, tasksmith-runtimes, windows]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

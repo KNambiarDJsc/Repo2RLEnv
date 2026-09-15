@@ -5,24 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sys
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import ValidationError
 
-# fcntl is POSIX-only and has no stdlib equivalent on Windows (msvcrt.locking
-# byte-ranges a file rather than advisory-locking the whole handle). Import
-# it lazily so this module — imported eagerly by cli.py just to register its
-# argparse subcommand — doesn't crash the whole CLI on Windows. The lock
-# itself becomes a documented no-op there; see the call site below.
-if sys.platform != "win32":
-    import fcntl
-
 from repo2rlenv.campaigns.budget import BudgetExceeded, BudgetLedger
 from repo2rlenv.campaigns.events import EventJournal, ProgressEvent
 from repo2rlenv.execution.lifecycle import save_record
+from repo2rlenv.locking import lock_file
 from repo2rlenv.quality.loop.artifacts import (
     EXPECTED_PASSES_CONTRACT,
     apply_repair,
@@ -648,11 +640,10 @@ class QualityLoop:
             raise ValueError("Quality output must be outside the input task")
         self.directory.mkdir(parents=True, exist_ok=True)
         with (self.directory / ".lock").open("a") as lock:
-            if sys.platform != "win32":
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError as exc:
-                    raise RuntimeError("Another controller owns this quality run") from exc
+            try:
+                lock_file(lock)
+            except BlockingIOError as exc:
+                raise RuntimeError("Another controller owns this quality run") from exc
             try:
                 return self._run(task, baseline, oracle, rollout, probes, resume)
             finally:

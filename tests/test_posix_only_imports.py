@@ -6,9 +6,9 @@ crashes with `ModuleNotFoundError` the moment anything imports that module —
 even just to register an argparse subcommand, never to call anything
 POSIX-specific. `cli.py`'s dispatcher eagerly imports every subsystem just to
 build `--help`, so one such import anywhere in that chain took down
-`repo2rlenv --version` entirely (#128). CI runs on Linux only, where these
-modules exist, so the bug is invisible there — this static check keeps new
-top-level imports explicit about the platforms they need.
+`repo2rlenv --version` entirely (#128). This static check complements the
+installed-wheel Windows CI checks and keeps new top-level imports explicit
+about the platforms they need.
 
 Guard the import instead: `if sys.platform != "win32": import fcntl`.
 """

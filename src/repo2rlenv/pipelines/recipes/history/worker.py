@@ -9,20 +9,13 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tarfile
 import uuid
 from pathlib import Path
 
-# fcntl is POSIX-only and has no stdlib equivalent on Windows. Import it
-# lazily so this module — imported eagerly by cli.py just to register its
-# argparse subcommand — doesn't crash the whole CLI on Windows. The lock
-# itself becomes a documented no-op there; see the call site below.
-if sys.platform != "win32":
-    import fcntl
-
 from repo2rlenv.execution.lifecycle import save_record
 from repo2rlenv.execution.python_repository import bootstrap_snapshot, test_image
+from repo2rlenv.locking import lock_file
 from repo2rlenv.pipelines.recipes.history.selection import check_entities, within
 from repo2rlenv.pipelines.recipes.history.test_suite import stage_tests
 from repo2rlenv.quality.python_evidence import test_excerpts
@@ -138,8 +131,7 @@ def prepare(config: dict, destination: Path) -> dict:
     root = Path("/work/history") / hashlib.sha256(repo.url.encode()).hexdigest()[:16]
     root.parent.mkdir(parents=True, exist_ok=True)
     with root.with_suffix(".lock").open("a") as lock:
-        if sys.platform != "win32":
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        lock_file(lock, blocking=True)
         if not root.exists():
             temporary = root.with_name(root.name + "-" + uuid.uuid4().hex)
             try:
