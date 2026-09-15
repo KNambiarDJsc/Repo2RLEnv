@@ -796,7 +796,9 @@ def pull_from_harbor(
         if registry_url:
             args += ["--registry-url", registry_url]
         logger.info("running: %s", " ".join(args))
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=600, check=False)
+        proc = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", timeout=600, check=False
+        )
         if proc.returncode != 0:
             raise RuntimeError(
                 f"harbor download failed (exit {proc.returncode}): "
@@ -880,7 +882,9 @@ def pull_from_github(
             args += ["--branch", ref]
         args += [clone_url, str(clone_dir)]
         logger.info("running: git clone --depth 1 [...] %s", owner_repo)
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=300, check=False)
+        proc = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", timeout=300, check=False
+        )
         if proc.returncode != 0:
             stderr = proc.stderr.replace(token, "***") if token else proc.stderr
             raise RuntimeError(f"git clone failed (exit {proc.returncode}): {stderr.strip()[:400]}")

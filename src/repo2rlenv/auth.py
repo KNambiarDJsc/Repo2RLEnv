@@ -34,6 +34,7 @@ def resolve_github_token(repo: RepoSpec, auth: AuthSpec) -> str | None:
                 ["gh", "auth", "token"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=5,
                 check=False,
             )
