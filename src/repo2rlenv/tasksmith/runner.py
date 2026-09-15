@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import hashlib
 import json
 import shlex
+import sys
 import time
 from pathlib import Path, PurePosixPath
 from typing import TypedDict
+
+# fcntl is POSIX-only and has no stdlib equivalent on Windows. Import it
+# lazily so this module — imported eagerly by cli.py just to register its
+# argparse subcommand — doesn't crash the whole CLI on Windows. The lock
+# itself becomes a documented no-op there; see the call site below.
+if sys.platform != "win32":
+    import fcntl
 
 from repo2rlenv.auth import resolve_llm_api_key
 from repo2rlenv.campaigns.budget import BudgetLedger
@@ -765,7 +772,8 @@ class Tasksmith:
             raise ValueError("stop-after must be within the frozen panel size")
         self.directory.mkdir(parents=True, exist_ok=True)
         with (self.directory / ".lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if sys.platform != "win32":
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return self._run(panel, limit, generation_run, reuse_evidence, source_records)
 
     def _run(self, panel, limit, generation_run, reuse_evidence=False, source_records=None):
