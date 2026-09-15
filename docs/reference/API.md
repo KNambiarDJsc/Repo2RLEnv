@@ -160,6 +160,7 @@ Repo2RLEnv ships **no execution runtime**. To run/score:
 |---|---|
 | `repo2rlenv generate ...` | `pipelines.PIPELINES[name](input, opts).run(out_dir)` |
 | `repo2rlenv validate <path>` | walk task.toml files + `tomllib.loads` |
+| `repo2rlenv validate <path> --deep [--oracle]` | `validation.validate_task(task_dir, data, oracle=...)` per task → `list[Finding]` |
 | `repo2rlenv push <dir> <owner>/<name>` | `hub.push_to_hub(local_dir, repo_id, auth, ...)` |
 | `repo2rlenv pull <owner>/<name> [<dir>]` | `hub.pull_from_hub(repo_id, local_dir, auth, ...)` |
 | `repo2rlenv bootstrap ...` | `bootstrap.ensure_bootstrap(repo, spec, llm)` |

@@ -143,6 +143,7 @@ src/repo2rlenv/
 ├── auth.py                     # token resolution (repo / LLM / registry / Hub)
 ├── llm.py                      # LiteLLM wrapper + completion_cost tracking
 ├── reward.py                   # SWE-RL-style diff-similarity reward (stdlib only)
+├── validation.py               # `validate --deep`: static task-asset + reproducibility checks
 └── config.py                   # YAML/TOML config loader
 
 tests/                  # unit tests mirror the module they cover; e2e in test_e2e_*.py
@@ -326,6 +327,8 @@ uv run repo2rlenv generate \
 
 # Validate a dataset (fast structural check — no LLM, no Docker)
 uv run repo2rlenv validate ./workspace/datasets/<name>
+# ...plus task assets + reproducibility metadata (still static); --oracle adds solution/
+uv run repo2rlenv validate ./workspace/datasets/<name> --deep
 
 # Publish / retrieve (a bare name resolves its owner via whoami)
 uv run repo2rlenv push ./workspace/datasets/<name> <org>/<name>
