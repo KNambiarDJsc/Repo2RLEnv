@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from repo2rlenv import __version__
-from repo2rlenv.ui import console, install_logging
+from repo2rlenv.ui import console, ensure_utf8_output, install_logging
 
 logger = logging.getLogger("repo2rlenv")
 
@@ -834,6 +834,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    ensure_utf8_output()
     _load_dotenv_if_present()
 
     parser = argparse.ArgumentParser(
