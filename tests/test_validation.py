@@ -121,6 +121,31 @@ def _warnings(findings: list[Finding]) -> set[str]:
     return {f.path for f in findings if f.severity == "warning"}
 
 
+@pytest.mark.parametrize(
+    "pipeline,recipe", [("terminal_synth", "tmax"), ("equivalence_tests", "r2e")]
+)
+def test_recipe_oracle_can_be_a_script_without_a_patch(tmp_path, pipeline, recipe):
+    task_dir = _pr_runtime_graded(tmp_path)
+    data = _rewrite(
+        task_dir,
+        lambda d: d["metadata"]["repo2env"].update(pipeline=pipeline, recipe=recipe),
+    )
+    (task_dir / "solution/patch.diff").unlink()
+    (task_dir / "solution/solve.sh").write_text(
+        "#!/bin/bash\nprintf 'reference output' > /workspace/output\n"
+    )
+    assert _errors(validate_task(task_dir, data, oracle=True)) == set()
+    (task_dir / "solution/solve.sh").unlink()
+    assert "solution/solve.sh" in _errors(validate_task(task_dir, data, oracle=True))
+
+
+def test_recipe_oracle_still_checks_a_supplied_patch(tmp_path):
+    task_dir = _pr_runtime_graded(tmp_path)
+    data = _rewrite(task_dir, lambda d: d["metadata"]["repo2env"].update(recipe="swe-gen"))
+    (task_dir / "solution/patch.diff").write_text("not a patch")
+    assert "solution/patch.diff" in _errors(validate_task(task_dir, data, oracle=True))
+
+
 # ----------------------------------------------------------------------------
 # No false positives on what the emitter actually writes
 # ----------------------------------------------------------------------------

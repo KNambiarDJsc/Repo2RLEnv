@@ -83,7 +83,7 @@ repo2rlenv validate ./datasets/<dataset-name>
 # Deeper preflight before an expensive build or eval — also checks each task's
 # assets (instruction, tests/test.sh, environment, graded verifier files) and
 # its [metadata.repo2env.reproducibility] table. --oracle additionally requires
-# a usable solution/patch.diff + solve.sh.
+# a solve script, plus solution/patch.diff for native pipelines.
 repo2rlenv validate ./datasets/<dataset-name> --deep
 repo2rlenv validate ./datasets/<dataset-name> --oracle
 ```

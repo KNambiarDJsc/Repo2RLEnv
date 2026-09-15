@@ -270,7 +270,7 @@ v0.2 adds:
 | `registry` mode's `FROM` line matches `image_ref` | per mode | warning |
 | `spec_version >= 0.2.0` task with `environment/Dockerfile` but no reproducibility subtable | Repo2RLEnv tasks | warning |
 | Unknown `pipeline` or `reward_kinds` entry | Repo2RLEnv tasks | warning |
-| `--oracle`: `solution/patch.diff` is a non-blank unified diff (skipped for `diff_format = "search_replace"`) and `solution/solve.sh` exists | Repo2RLEnv tasks | error |
+| `--oracle`: a solve script exists; native pipelines also require `solution/patch.diff` as a non-blank unified diff (format check skipped for `diff_format = "search_replace"`) | Repo2RLEnv tasks; named recipes can use script-only solutions, but any supplied `patch.diff` is still checked | error |
 
 What deep validation deliberately does **not** do:
 

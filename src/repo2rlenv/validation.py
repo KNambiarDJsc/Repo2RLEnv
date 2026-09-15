@@ -85,7 +85,8 @@ def validate_task(task_dir: Path, data: dict[str, Any], *, oracle: bool = False)
     """Statically check one task directory against its parsed task.toml.
 
     `data` is the already-parsed task.toml. With `oracle=True`, Repo2RLEnv
-    tasks must also ship a usable `solution/patch.diff` + solve script.
+    tasks must also ship a solve script. Native pipelines require their patch;
+    named recipes can solve through scripts without a patch artifact.
     """
     report = _Report()
 
@@ -296,7 +297,13 @@ def _check_repro(task_dir: Path, r2e: dict[str, Any], report: _Report) -> None:
 
 
 def _check_oracle(task_dir: Path, r2e: dict[str, Any], script_ext: str, report: _Report) -> None:
-    patch = _check_nonempty_file(task_dir, "solution/patch.diff", report)
+    # Named recipes can restore files or run commands directly in solve.sh.
+    # Preserve the stricter patch contract for existing native tasks, and
+    # validate any patch a recipe actually includes.
+    requires_patch = r2e.get("recipe", "native") == "native"
+    patch = None
+    if requires_patch or (task_dir / "solution/patch.diff").exists():
+        patch = _check_nonempty_file(task_dir, "solution/patch.diff", report)
     pr_diff = r2e.get("pr_diff")
     search_replace = isinstance(pr_diff, dict) and pr_diff.get("diff_format") == "search_replace"
     if patch is not None and not search_replace and not _DIFF_FILE_HEADER_RE.search(patch):
