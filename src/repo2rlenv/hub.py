@@ -516,12 +516,12 @@ def push_to_hub(
     enriched = False
     if src_manifest.exists():
         try:
-            enriched = "validation" in json.loads(src_manifest.read_text())
+            enriched = "validation" in json.loads(src_manifest.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             enriched = False
     manifest_summary: dict[str, Any] | None = None
     if enriched:
-        manifest_text = src_manifest.read_text()
+        manifest_text = src_manifest.read_text(encoding="utf-8")
         (staging / "manifest.json").write_text(manifest_text, encoding="utf-8")
         logger.info("preserving enriched manifest.json (has validation block)")
         try:

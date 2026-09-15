@@ -242,7 +242,12 @@ def test_composition_block_renders_validation_and_skew():
     assert "eval_grade == true" in out  # strict-eval guidance
 
 
-def test_push_preserves_enriched_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+# Non-ASCII title: on Windows a locale-encoded read (cp1252) failed to decode it,
+# so the enriched manifest was silently dropped and regenerated.
+@pytest.mark.parametrize("title", ["Fix option parsing", "Fix Árvíztűrő 修复 parsing"])
+def test_push_preserves_enriched_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, title: str
+):
     """A source manifest.json with a `validation` block is preserved verbatim,
     not clobbered by push's auto-generated minimal manifest. Audit P1."""
     import json
@@ -253,9 +258,11 @@ def test_push_preserves_enriched_manifest(tmp_path: Path, monkeypatch: pytest.Mo
         "pipeline": "pr_runtime",
         "validation": {"tracked_resolved": 1, "command_resolved": 1, "harbor_version": "0.6.6"},
         "repo_distribution": {"o/r": 1},
-        "tasks": [{"task_id": "task-1", "validation": {"resolved": True}}],
+        "tasks": [{"task_id": "task-1", "title": title, "validation": {"resolved": True}}],
     }
-    (tmp_path / "manifest.json").write_text(json.dumps(enriched), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(enriched, ensure_ascii=False), encoding="utf-8"
+    )
 
     monkeypatch.setattr("repo2rlenv.hub.resolve_hf_token", lambda _auth: "fake-token")
     uploaded: dict[str, str] = {}
@@ -264,8 +271,8 @@ def test_push_preserves_enriched_manifest(tmp_path: Path, monkeypatch: pytest.Mo
         def create_repo(self, *a, **k): ...
         def upload_folder(self, *, folder_path, **k):
             staging = Path(folder_path)
-            uploaded["manifest"] = (staging / "manifest.json").read_text()
-            uploaded["readme"] = (staging / "README.md").read_text()
+            uploaded["manifest"] = (staging / "manifest.json").read_text(encoding="utf-8")
+            uploaded["readme"] = (staging / "README.md").read_text(encoding="utf-8")
 
             class _Op:
                 oid = "deadbeef"
@@ -279,4 +286,5 @@ def test_push_preserves_enriched_manifest(tmp_path: Path, monkeypatch: pytest.Mo
 
     m = json.loads(uploaded["manifest"])
     assert "validation" in m and m["validation"]["command_resolved"] == 1  # preserved
+    assert m["tasks"][0]["title"] == title
     assert "Validation & composition" in uploaded["readme"]  # card reflects it
