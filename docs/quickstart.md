@@ -21,6 +21,12 @@ hf auth login
 
 ## Install
 
+Requires Python 3.12+. Windows CI checks the installed CLI, recipe discovery,
+native task emission and static validation. Run Tasksmith, research-recipe
+generation and the quality controller on Linux, macOS or WSL: those controllers
+still depend on POSIX artifact permissions and process cleanup. Remote sandboxes
+run Linux; choosing a cloud provider does not remove these host requirements.
+
 ```bash
 pip install repo2rlenv         # from PyPI
 # or:

@@ -75,6 +75,7 @@ Closes #N
 
 - **lint** — `uv run ruff check .` + `uv run ruff format --check .`
 - **test** — `uv run pytest -q` against Python 3.12, 3.13, 3.14 (matrix)
+- **Windows** — base-only wheel CLI smoke checks and real process-lock contention on Python 3.12, 3.13, 3.14; the same gate runs before publication. Full controller portability remains separate work.
 - **build** — `uv build` produces sdist + wheel, smoke-installs the wheel, checks `repo2rlenv --version`
 
 A green CI is the floor for merge — green plus at least one approving review is the ceiling.

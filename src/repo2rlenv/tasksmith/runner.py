@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import hashlib
 import json
 import shlex
@@ -27,6 +26,7 @@ from repo2rlenv.execution.lifecycle import (
     save_record,
     stop_worker,
 )
+from repo2rlenv.locking import lock_file
 from repo2rlenv.quality.loop.artifacts import task_identity
 from repo2rlenv.quality.loop.client import RunBudget
 from repo2rlenv.quality.loop.models import ProbeManifest
@@ -765,7 +765,7 @@ class Tasksmith:
             raise ValueError("stop-after must be within the frozen panel size")
         self.directory.mkdir(parents=True, exist_ok=True)
         with (self.directory / ".lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_file(lock)
             return self._run(panel, limit, generation_run, reuse_evidence, source_records)
 
     def _run(self, panel, limit, generation_run, reuse_evidence=False, source_records=None):

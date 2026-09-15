@@ -1,0 +1,44 @@
+name: Windows compatibility
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit or release tag to validate
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    name: Windows wheel (py${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: false
+      - run: uv build
+      - name: Install base wheel in isolation
+        run: |
+          uv venv "$env:RUNNER_TEMP/cli-check"
+          $wheel = (Get-ChildItem dist/*.whl).FullName
+          uv pip install --python "$env:RUNNER_TEMP/cli-check/Scripts/python.exe" $wheel
+      - name: Check console entrypoint, discovery and native task validation
+        run: '& "$env:RUNNER_TEMP/cli-check/Scripts/python.exe" tests/check_cli_install.py'
+      - name: Check real Windows process locks
+        run: |
+          uv pip install --python "$env:RUNNER_TEMP/cli-check/Scripts/python.exe" pytest
+          & "$env:RUNNER_TEMP/cli-check/Scripts/python.exe" -m pytest -q tests/test_locking.py tests/test_posix_only_imports.py

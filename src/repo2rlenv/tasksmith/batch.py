@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -23,6 +22,7 @@ from pydantic import Field, model_validator
 from repo2rlenv.campaigns.budget import BudgetLedger
 from repo2rlenv.execution.artifacts import check_runtime_wheel
 from repo2rlenv.execution.lifecycle import save_record
+from repo2rlenv.locking import lock_file
 from repo2rlenv.quality.loop.artifacts import digest
 from repo2rlenv.quality.loop.client import RunBudget
 from repo2rlenv.quality.loop.models import LoopResult, ProbeManifest
@@ -370,7 +370,7 @@ def run_batch(
     directory, campaign, wheel = directory.resolve(), campaign.resolve(), wheel.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / ".lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file(lock)
         prior = [verified_result(path) for path in plan.prior_verified]
         if len({item["url"] for item in prior}) != len(prior):
             raise ValueError("Prior verified results contain duplicate PRs")

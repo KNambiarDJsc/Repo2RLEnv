@@ -50,6 +50,10 @@ and repair emitted tasks; exporting a task alone does not establish its quality.
 Requires **Python 3.12+** and Git. This example generates PR-diff tasks without
 building a container:
 
+Windows CI covers CLI startup, recipe discovery, native task emission and static
+validation. Use Linux, macOS or WSL for Tasksmith, research-recipe generation and
+the quality controller; their full native Windows execution is not yet supported.
+
 ```bash
 pip install repo2rlenv
 

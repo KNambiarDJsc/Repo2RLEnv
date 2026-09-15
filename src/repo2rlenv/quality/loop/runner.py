@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import re
@@ -15,6 +14,7 @@ from pydantic import ValidationError
 from repo2rlenv.campaigns.budget import BudgetExceeded, BudgetLedger
 from repo2rlenv.campaigns.events import EventJournal, ProgressEvent
 from repo2rlenv.execution.lifecycle import save_record
+from repo2rlenv.locking import lock_file
 from repo2rlenv.quality.loop.artifacts import (
     EXPECTED_PASSES_CONTRACT,
     apply_repair,
@@ -641,7 +641,7 @@ class QualityLoop:
         self.directory.mkdir(parents=True, exist_ok=True)
         with (self.directory / ".lock").open("a") as lock:
             try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_file(lock)
             except BlockingIOError as exc:
                 raise RuntimeError("Another controller owns this quality run") from exc
             try:
