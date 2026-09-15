@@ -28,10 +28,21 @@ _NO_TEMPERATURE_RE = re.compile(
     r"(claude-opus-4-7|claude-opus-4-8|gpt-5(\.|-|$)|gpt-6|o1-|o3-|o4-)",
     re.IGNORECASE,
 )
+_OPENAI_COMPLETION_LIMIT_RE = re.compile(r"^(gpt-[56](?:[.-]|$)|o[134](?:-|$))")
 
 
 def _supports_temperature(model: str) -> bool:
     return _NO_TEMPERATURE_RE.search(model) is None
+
+
+def completion_token_limit(spec: LLMSpec, max_tokens: int) -> dict[str, int]:
+    """Provider wire parameters shared with externally orchestrated Harbor calls."""
+    name = (
+        "max_completion_tokens"
+        if spec.provider == "openai" and _OPENAI_COMPLETION_LIMIT_RE.match(spec.model)
+        else "max_tokens"
+    )
+    return {name: max_tokens}
 
 
 @dataclass(slots=True)
@@ -129,6 +140,7 @@ def _do_complete(
     user: str,
     max_tokens: int,
     temperature: float,
+    response_schema: dict | None = None,
 ) -> LLMResponse:
     """One non-fallback chat-completion call. Internal helper for `complete()`."""
     import litellm  # type: ignore[import-untyped]
@@ -143,9 +155,12 @@ def _do_complete(
     kwargs: dict = {
         "model": spec.qualified_name,
         "messages": messages,
-        "max_tokens": max_tokens,
+        "num_retries": 0,
         "timeout": spec.timeout_sec,
     }
+    # Unknown-to-LiteLLM model IDs still need the current OpenAI wire contract.
+    # Do not rely on the installed SDK's model catalog to rename this parameter.
+    kwargs.update(completion_token_limit(spec, max_tokens))
     if api_key is not None:
         kwargs["api_key"] = api_key
     # Newer reasoning-focused models (Opus 4.7+, GPT-5+) reject `temperature`.
@@ -153,6 +168,15 @@ def _do_complete(
         kwargs["temperature"] = temperature
     if spec.endpoint:
         kwargs["api_base"] = spec.endpoint
+    if response_schema is not None:
+        kwargs["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "repo2rlenv_response",
+                "strict": True,
+                "schema": response_schema,
+            },
+        }
 
     if spec.provider == "huggingface" and spec.endpoint is None:
         kwargs.setdefault("api_base", "https://router.huggingface.co/v1")
@@ -190,6 +214,7 @@ def complete(
     user: str,
     max_tokens: int = 1024,
     temperature: float = 0.7,
+    response_schema: dict | None = None,
     _depth: int = 0,
 ) -> LLMResponse:
     """Single chat-completion call with automatic fallback on transient errors.
@@ -208,6 +233,7 @@ def complete(
             user=user,
             max_tokens=max_tokens,
             temperature=temperature,
+            response_schema=response_schema,
         )
     except Exception as exc:
         if _depth >= 3 or spec.fallback is None or not _is_failover_eligible(exc):
@@ -224,5 +250,6 @@ def complete(
             user=user,
             max_tokens=max_tokens,
             temperature=temperature,
+            response_schema=response_schema,
             _depth=_depth + 1,
         )

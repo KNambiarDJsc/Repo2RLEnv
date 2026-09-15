@@ -13,6 +13,7 @@ silenced so they don't tear the live display.
 from __future__ import annotations
 
 import codecs
+import json
 import logging
 import os
 import sys
@@ -88,6 +89,11 @@ class R2EConsole:
     def print(self, *args: Any, **kwargs: Any) -> None:
         self.console.print(*args, **kwargs)
 
+    def json(self, value: Any) -> None:
+        """Write one machine-readable record, without terminal wrapping or ANSI."""
+        self.console.file.write(json.dumps(value, sort_keys=True, default=str) + "\n")
+        self.console.file.flush()
+
 
 def _make_default_console() -> R2EConsole:
     return R2EConsole()
@@ -117,7 +123,7 @@ def install_logging(*, level: int = logging.INFO, propagate_noisy: bool = False)
     _LOGGING_INSTALLED = True
 
     handler = RichHandler(
-        console=console.console,
+        console=Console(stderr=True),
         rich_tracebacks=True,
         markup=True,
         show_path=False,

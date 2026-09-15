@@ -143,8 +143,6 @@ def _add_llm_args(parser: argparse.ArgumentParser, *, required: bool, fallback: 
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    from pydantic import ValidationError
-
     from repo2rlenv.config import load_generation_input
     from repo2rlenv.pipelines import PIPELINES
     from repo2rlenv.spec.options import parse_options
@@ -154,10 +152,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
     if args.repo:
         overrides["repo"] = {"url": args.repo, "ref": args.ref, "access": args.access}
     if args.pipeline:
-        overrides["pipeline"] = {
-            "name": args.pipeline,
-            "options": _parse_pipeline_opts(args.pipeline_opt),
-        }
+        overrides["pipeline"] = {"name": args.pipeline}
+    if args.pipeline_opt:
+        overrides.setdefault("pipeline", {})["options"] = _parse_pipeline_opts(args.pipeline_opt)
+    if getattr(args, "recipe", None):
+        overrides.setdefault("pipeline", {})["recipe"] = args.recipe
+    if getattr(args, "resume", False):
+        overrides["execution"] = {"resume": True}
     llm_overrides = _llm_overrides(args)
     if llm_overrides:
         overrides["llm"] = llm_overrides
@@ -170,22 +171,45 @@ def cmd_generate(args: argparse.Namespace) -> int:
         }
 
     config_path = Path(args.config) if args.config else None
-    try:
-        gen_input = load_generation_input(config_path, overrides)
-    except ValidationError as exc:
-        # e.g. --llm-endpoint with a config that has no `llm:` block — show the
-        # field errors, not a traceback.
-        console.error(f"invalid generation input:\n{exc}")
-        return 2
+    # The shared CLI boundary renders validation errors for both human and JSON output.
+    gen_input = load_generation_input(config_path, overrides)
 
     if args.llm and config_path is not None:
         gen_input = _drop_config_llm_extras(gen_input, args, config_path)
+
+    if gen_input.pipeline.recipe != "native":
+        if args.max_spend_usd is not None:
+            raise ValueError(
+                "--max-spend-usd is only supported by native generation. Owned recipes use "
+                "the campaign ledger: initialize it with 'campaign init PATH --budget-usd N' "
+                "and select that directory in execution.campaign_dir. No work was dispatched."
+            )
+        from repo2rlenv.pipelines.recipes.cli import run_recipe
+
+        return run_recipe(gen_input, plain=args.no_ui, json_output=getattr(args, "json", False))
+
+    if getattr(args, "json", False):
+        raise ValueError(
+            "generate --json streams owned recipe events. Native generation has no JSON "
+            "output contract; omit --json or select an owned --recipe. No work was dispatched."
+        )
+
+    # Keep the native CLI's historical default while distinguishing an explicit
+    # spending flag from omission on the owned-recipe route.
+    if args.max_spend_usd is None:
+        args.max_spend_usd = 5.0
 
     pipeline_cls = PIPELINES.get(gen_input.pipeline.name.value)
     if pipeline_cls is None:
         console.error(
             f"pipeline {gen_input.pipeline.name.value!r} not implemented in v{__version__}; "
             f"available: {sorted(PIPELINES)}"
+        )
+        return 2
+
+    if not getattr(pipeline_cls, "native_supported", True):
+        console.error(
+            f"{gen_input.pipeline.name.value} requires an explicit --recipe; see pipelines list"
         )
         return 2
 
@@ -955,11 +979,20 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+class CLIUsageError(ValueError):
+    """Invalid command syntax, rendered by the same boundary as input errors."""
+
+
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise CLIUsageError(f"{message}; use '{self.prog} --help' for usage")
+
+
+def _dispatch(argv: list[str]) -> int:
     ensure_utf8_output()
     _load_dotenv_if_present()
 
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="repo2rlenv",
         description="Turn any repository into an RL environment for training and evaluation.",
     )
@@ -970,6 +1003,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
+    from repo2rlenv.campaigns.cli import add_campaign_parsers
+    from repo2rlenv.campaigns.release_cli import add_release_parser
+    from repo2rlenv.pipelines.recipes.cli import add_discovery_parser
+    from repo2rlenv.quality.loop.cli import add_quality_parser
+    from repo2rlenv.task_labels import add_tasks_parser
+
+    add_discovery_parser(sub)
+    add_campaign_parsers(sub)
+    add_release_parser(sub)
+    add_quality_parser(sub)
+    add_tasks_parser(sub)
+    from repo2rlenv.tasksmith.cli import add_parser as add_tasksmith_parser
+
+    add_tasksmith_parser(sub)
+
     # generate
     g = sub.add_parser("generate", help="Run a synthesis pipeline against a repo")
     g.add_argument("--config", help="path to YAML/TOML config file")
@@ -977,6 +1025,13 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--ref", default="HEAD", help="branch/tag/commit (default: HEAD)")
     g.add_argument("--access", choices=["public", "private", "auto"], default="auto")
     g.add_argument("--pipeline", help="pipeline name")
+    g.add_argument("--recipe", help="owned recipe name (native by default)")
+    g.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume an owned run without redispatching completed work",
+    )
+    g.add_argument("--json", action="store_true", help="emit owned recipe progress as JSON Lines")
     g.add_argument(
         "--pipeline-opt",
         action="append",
@@ -992,8 +1047,11 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument(
         "--max-spend-usd",
         type=float,
-        default=5.0,
-        help="LLM budget cap across bootstrap + pipeline (default 5.0; 0 = unlimited)",
+        default=None,
+        help=(
+            "native generation LLM budget (default 5.0; 0 = unlimited); "
+            "owned recipes require a campaign ledger budget instead"
+        ),
     )
     g.add_argument(
         "--language", help="bootstrap: override auto-detect (python|node|go|rust|java|c_cpp)"
@@ -1183,8 +1241,25 @@ def main(argv: list[str] | None = None) -> int:
     bs.set_defaults(func=cmd_bootstrap)
 
     args = parser.parse_args(argv)
-    install_logging(level=logging.DEBUG if args.verbose else logging.INFO)
     return args.func(args)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI error boundary; Python APIs continue to raise their original errors."""
+    from repo2rlenv.ui.errors import report_error
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    verbose = "--verbose" in argv or "-v" in argv
+    install_logging(level=logging.DEBUG if verbose else logging.INFO)
+    try:
+        return _dispatch(argv)
+    except SystemExit as exc:
+        # argparse help/version use numeric exits; legacy adapters use a message.
+        if exc.code is None or isinstance(exc.code, int):
+            raise
+        return report_error(CLIUsageError(str(exc.code)), json_output="--json" in argv)
+    except Exception as exc:
+        return report_error(exc, json_output="--json" in argv, verbose=verbose)
 
 
 if __name__ == "__main__":

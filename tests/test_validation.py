@@ -319,7 +319,7 @@ def test_unknown_pipeline_and_reward_kind_warn(tmp_path: Path):
     task_dir = _pr_diff_lite(tmp_path)
 
     def mutate(d):
-        d["metadata"]["repo2env"]["pipeline"] = "pr_to_env"
+        d["metadata"]["repo2env"]["pipeline"] = "unregistered_example_pipeline"
         d["metadata"]["repo2env"]["reward_kinds"] = ["diff_similarity", "llm_judge"]
 
     findings = validate_task(task_dir, _rewrite(task_dir, mutate))
