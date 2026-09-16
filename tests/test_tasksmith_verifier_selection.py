@@ -161,7 +161,8 @@ def test_modified_only_cpu_task_collects_directories_with_strict_contract(monkey
     monkeypatch.setattr(worker, "reverse_source", lambda *args: (defective, []))
     monkeypatch.setattr(worker, "test_image", test_image)
     monkeypatch.setattr(worker, "test_excerpts", lambda *args, **kwargs: [])
-    monkeypatch.setattr("os.chown", lambda *args: None)
+    # raising=False: os.chown doesn't exist on Windows.
+    monkeypatch.setattr("os.chown", lambda *args: None, raising=False)
     output = tmp_path / "construct"
     output.mkdir()
     result = worker.construct(

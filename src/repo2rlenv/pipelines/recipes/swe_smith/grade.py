@@ -95,7 +95,13 @@ def validate_submission(workspace: Path, contract: dict) -> None:
         ):
             raise ValueError("Non-Python source assets must remain unchanged")
         if relative not in backups:
-            os.chown(path, 0, 0)
+            # os.chown doesn't exist on Windows. This module only ever runs for
+            # real inside the Linux verifier container (every other path here
+            # is an absolute container path); the guard exists so the tests
+            # that call validate_submission() directly can run on a Windows
+            # host without touching real container-only ownership semantics.
+            if sys.platform != "win32":
+                os.chown(path, 0, 0)
             path.chmod(0o644)
     # Only the verifier's collected copy is cleaned. The learner workspace and
     # archived submission retain their bytes. Validate every path first so a
@@ -126,7 +132,8 @@ def main() -> None:
         return
     with tempfile.TemporaryDirectory(prefix="r2e-grade-") as temporary:
         working = Path(temporary)
-        os.chown(working, 1001, 1001)
+        if sys.platform != "win32":  # os.chown doesn't exist on Windows; see above
+            os.chown(working, 1001, 1001)
         working.chmod(0o700)
         report = working / "results.xml"
         command = [

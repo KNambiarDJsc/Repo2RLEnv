@@ -25,7 +25,9 @@ def source_tree(tmp_path, monkeypatch):
         path = base / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
-    monkeypatch.setattr("os.chown", lambda *args: None)
+    # raising=False: os.chown doesn't exist on Windows, unlike POSIX where
+    # this test's whole point is to neutralize it.
+    monkeypatch.setattr("os.chown", lambda *args: None, raising=False)
     return base
 
 
