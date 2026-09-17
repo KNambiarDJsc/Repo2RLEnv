@@ -84,7 +84,10 @@ def reverse_crlf_patch(root: Path, patch: Path) -> bool:
         adapted_path = directory / "source.diff"
         adapted_path.write_bytes(adapted)
         result = subprocess.run(
-            ["git", "apply", "--reverse", str(adapted_path.resolve())],
+            # core.autocrlf=false: `staged` isn't a git repository, so `git apply`
+            # would otherwise fall back to the caller's global config and risk
+            # re-normalizing the exact CRLF bytes this fallback just reconstructed.
+            ["git", "-c", "core.autocrlf=false", "apply", "--reverse", str(adapted_path.resolve())],
             cwd=staged,
             capture_output=True,
             text=True,

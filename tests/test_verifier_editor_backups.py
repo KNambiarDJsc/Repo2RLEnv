@@ -3,6 +3,7 @@
 import hashlib
 import os
 import shutil
+import sys
 
 import pytest
 
@@ -14,7 +15,8 @@ def submission(tmp_path, monkeypatch):
     workspace = tmp_path / "private"
     (workspace / "src").mkdir(parents=True)
     (workspace / "src/model.py").write_text("value = 1\n")
-    monkeypatch.setattr("os.chown", lambda *args: None)
+    # raising=False: os.chown doesn't exist on Windows.
+    monkeypatch.setattr("os.chown", lambda *args: None, raising=False)
     contract = {"submitted_files": ["src/model.py"], "submitted_roots": ["src"]}
     return workspace, contract
 
@@ -48,7 +50,20 @@ def test_unknown_non_python_additions_still_reject_without_cleaning(submission, 
     assert backup.read_text() == "previous\n"
 
 
-@pytest.mark.parametrize("kind", ["symlink", "dangling_symlink", "oversized", "fifo"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "symlink",
+        "dangling_symlink",
+        "oversized",
+        pytest.param(
+            "fifo",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32", reason="os.mkfifo doesn't exist on Windows"
+            ),
+        ),
+    ],
+)
 def test_backup_paths_keep_regular_file_and_symlink_guards(submission, tmp_path, kind):
     workspace, contract = submission
     backup = workspace / "src/model.py.bak"

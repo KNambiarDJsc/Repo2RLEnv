@@ -211,9 +211,14 @@ def reverse_source(source: dict, base: Path, output: Path) -> tuple[Path, tuple[
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(base / relative, path)
     patch = output / "source.diff"
-    patch.write_text(source["source_diff"])
+    patch.write_bytes(source["source_diff"].encode())
     try:
-        run(["git", "apply", "--reverse", str(patch)], cwd=defective)
+        # -c core.autocrlf=false: `defective` isn't a git repository, so without
+        # an explicit override `git apply` falls back to the caller's global
+        # config. On a machine with the (very common, Git-for-Windows-default)
+        # `core.autocrlf=true`, that silently rewrites line endings while
+        # applying, corrupting the exact-byte reversal this function promises.
+        run(["git", "-c", "core.autocrlf=false", "apply", "--reverse", str(patch)], cwd=defective)
     except ValueError:
         if not reverse_crlf_patch(defective, patch):
             raise
@@ -277,7 +282,10 @@ def construct(source: dict, profile: Profile, design: Design, ready: dict, outpu
                 "Private supplements require an existing tests/ directory and an unused tasksmith_behavior.py path"
             )
         local = output / "tasksmith_behavior.py"
-        local.write_text(design.additional_tests)
+        # write_bytes, not write_text: this file is re-read as raw bytes below and
+        # shipped verbatim into the bundle; write_text's newline translation would
+        # rewrite LF to the host's line separator (CRLF on Windows) on the way in.
+        local.write_bytes(design.additional_tests.encode())
         additions[extra] = local
         options.test_selectors.append(extra)
         if "tests" not in options.test_paths:

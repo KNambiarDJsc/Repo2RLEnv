@@ -72,7 +72,8 @@ def test_added_modules_are_absent_and_new_helpers_can_be_submitted(tmp_path, mon
     assert Task(task).config.artifacts[0].source == "/workspace/lib"
     contract = json.loads((task / "tests/contract.json").read_text())
     workspace = task / "environment/source"
-    monkeypatch.setattr("os.chown", lambda *args: None)
+    # raising=False: os.chown doesn't exist on Windows.
+    monkeypatch.setattr("os.chown", lambda *args: None, raising=False)
     # Missing new APIs are left to behavioral assertions, not a collection exception.
     validate_submission(workspace, contract)
     (workspace / "lib/helper.py").write_text("value = 1\n")
