@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import shlex
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -440,11 +441,17 @@ def _write_staged(writes: list[tuple[Path, bytes, int | None]]) -> None:
     staged: list[tuple[Path, Path]] = []
     try:
         for path, data, mode in writes:
-            tmp = path.with_name(path.name + ".migrate-tmp")
-            tmp.write_bytes(data)
-            if mode is not None:
-                tmp.chmod(mode)
+            # A task can contain a pre-planted temporary-file symlink or FIFO.
+            # Allocate exclusively and write through the open descriptor rather
+            # than reopening a predictable path supplied by the task.
+            fd, name = tempfile.mkstemp(
+                prefix=f".{path.name}.", suffix=".migrate-tmp", dir=path.parent
+            )
+            tmp = Path(name)
             staged.append((tmp, path))
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+            tmp.chmod(mode if mode is not None else 0o644)
         for tmp, path in staged:
             os.replace(tmp, path)
     finally:

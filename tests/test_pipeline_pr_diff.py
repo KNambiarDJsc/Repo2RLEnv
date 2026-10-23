@@ -745,19 +745,19 @@ def test_migrate_failed_write_leaves_task_unrepaired_and_retry_finishes(
     task_dir = tmp_path / "x__y-1"
     _write_old_style_pr_diff_task(task_dir)
     original = (task_dir / "environment" / "Dockerfile").read_bytes()
-    real_write_bytes = Path.write_bytes
+    real_chmod = Path.chmod
 
-    def flaky_write_bytes(self: Path, data: bytes) -> int:
-        if self.name.startswith("verifier.py"):
-            raise OSError("disk full")
-        return real_write_bytes(self, data)
+    def flaky_chmod(self: Path, mode: int) -> None:
+        if self.name.startswith(".verifier.py."):
+            raise OSError("staging failed")
+        real_chmod(self, mode)
 
-    monkeypatch.setattr(Path, "write_bytes", flaky_write_bytes)
+    monkeypatch.setattr(Path, "chmod", flaky_chmod)
     failed = migrate_pr_diff_task(task_dir)
     monkeypatch.undo()
 
     assert failed["action"] == "error"
-    assert "disk full" in failed["detail"]
+    assert "staging failed" in failed["detail"]
     assert (task_dir / "environment" / "Dockerfile").read_bytes() == original
     assert not list(task_dir.rglob("*.migrate-tmp"))
 
@@ -792,6 +792,38 @@ def _symlink_or_skip(link: Path, target: Path) -> None:
         link.symlink_to(target, target_is_directory=target.is_dir())
     except (OSError, NotImplementedError):
         pytest.skip("symlinks unavailable on this platform/user")
+
+
+def test_migrate_ignores_preplanted_temporary_symlink(tmp_path: Path) -> None:
+    task_dir = tmp_path / "x__y-1"
+    _write_old_style_pr_diff_task(task_dir)
+    sentinel = tmp_path / "outside.txt"
+    sentinel.write_bytes(b"keep me")
+    planted = task_dir / "tests" / "verifier.py.migrate-tmp"
+    _symlink_or_skip(planted, sentinel)
+
+    result = migrate_pr_diff_task(task_dir)
+
+    assert result["action"] == "migrated", result
+    assert sentinel.read_bytes() == b"keep me"
+    assert planted.is_symlink()
+    assert not (task_dir / "tests" / "verifier.py").is_symlink()
+    assert list(task_dir.rglob("*.migrate-tmp")) == [planted]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs only")
+def test_migrate_never_opens_preplanted_temporary_fifo(tmp_path: Path) -> None:
+    task_dir = tmp_path / "x__y-1"
+    _write_old_style_pr_diff_task(task_dir)
+    planted = task_dir / "tests" / "verifier.py.migrate-tmp"
+    os.mkfifo(planted)
+
+    result = migrate_pr_diff_task(task_dir)
+
+    assert result["action"] == "migrated", result
+    assert planted.is_fifo()
+    assert (task_dir / "tests" / "verifier.py").is_file()
+    assert list(task_dir.rglob("*.migrate-tmp")) == [planted]
 
 
 def test_migrate_rejects_symlinked_tests_dir_without_writing_outside(tmp_path: Path) -> None:

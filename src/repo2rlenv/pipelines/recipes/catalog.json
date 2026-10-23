@@ -325,5 +325,41 @@
     },
     "rfc": "0026-scaler-recipe.md",
     "target": 20
+  },
+  {
+    "id": "codemidas",
+    "title": "CodeMidas",
+    "pipeline": "repo_reconstruct",
+    "source_kinds": [
+      "repository"
+    ],
+    "summary": "Explore working source, remove a coherent feature, generate observed behavioral tests, and export a private-oracle Harbor task.",
+    "upstream": {
+      "paper": "https://arxiv.org/abs/2609.22068",
+      "implementation": "independent method reproduction",
+      "version": "arXiv:2609.22068v1",
+      "license": "NOASSERTION",
+      "retained_material": false
+    },
+    "rfc": "0031-codemidas-recipe.md",
+    "target": 100
+  },
+  {
+    "id": "frontiersmith",
+    "title": "FrontierSmith optimization synthesis",
+    "pipeline": "optimization_synth",
+    "source_kinds": [
+      "seeds"
+    ],
+    "summary": "Mutate closed-ended problems into optimization tasks, filter strategy diversity and validate deterministic graded rewards. Owned paper-inspired Python adaptation.",
+    "upstream": {
+      "paper": "https://arxiv.org/abs/2605.14445",
+      "repository": "https://github.com/FrontierCS/FrontierSmith",
+      "commit": "166c8be14a62b013ef78e6868e4355421c8c6456",
+      "license": "NOASSERTION",
+      "retained_material": false
+    },
+    "rfc": "0032-frontiersmith-recipe.md",
+    "target": 10
   }
 ]

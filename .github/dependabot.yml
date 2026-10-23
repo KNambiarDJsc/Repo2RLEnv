@@ -21,6 +21,9 @@ updates:
         patterns: ["*"]
       python-compatible:
         patterns: ["*"]
+        # Offline/native adapters depend on a versioned Harbor contract.
+        # Review its upgrades separately; security updates remain grouped above.
+        exclude-patterns: ["harbor"]
         update-types: ["minor", "patch"]
   - package-ecosystem: "npm"
     directory: "/src/repo2rlenv/tasksmith/author/runtimes"
@@ -31,3 +34,21 @@ updates:
     groups:
       coding-runtimes:
         patterns: ["*"]
+  - package-ecosystem: "npm"
+    directory: "/website"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      docs-site-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      docs-site:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Remotion must match the version the vendored films were built with
+      # (hf-motion embed/build.mjs); bump it together with a rebuilt films.mjs.
+      - dependency-name: "remotion"
+      - dependency-name: "@remotion/*"

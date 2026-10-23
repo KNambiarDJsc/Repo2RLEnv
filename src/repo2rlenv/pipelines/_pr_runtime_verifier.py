@@ -104,6 +104,9 @@ def parse_pytest(log: str) -> dict[str, str]:
                 break
         if leading is not None:
             work = line[len(leading) :].strip()
+            # unittest's `FAILED (failures=1)` footer is a count, not a node ID.
+            if work.startswith("(") and work.endswith(")"):
+                continue
             if leading == SKIPPED and re.match(r"^\[\d+\](?:\s|$)", work):
                 # Folded skips report a file location, not a parametrized ID.
                 tokens = work.split(maxsplit=2)
@@ -123,6 +126,83 @@ def parse_pytest(log: str) -> dict[str, str]:
             name = m.group("name")
             if "::" in name or name.endswith(".py"):
                 out[name] = m.group("status")
+    return out
+
+
+# Keep these patterns in sync with log_parsers/unittest_parser.py.
+_UT_NAME_RE = re.compile(r"^(?P<method>[^\s()]+) \((?P<dotted>[\w.]+)\)(?: .+)?$")
+_UT_BLOCK_RE = re.compile(r"^(?P<status>FAIL|ERROR):\s+(?P<name>.+?)\s*$")
+_UT_STATUS = {
+    "ok": PASSED,
+    "FAIL": FAILED,
+    "ERROR": ERROR,
+    "expected failure": PASSED,
+    "unexpected success": FAILED,
+}
+
+
+# Subtests report under the parent's identity, worst status first, because a
+# repaired run prints only `parent ... ok`.
+_UT_RANK = {SKIPPED: 0, PASSED: 1, FAILED: 2, ERROR: 3}
+
+
+def _ut_canonical(method: str, dotted: str) -> str:
+    return dotted if dotted.endswith(f".{method}") else f"{dotted}.{method}"
+
+
+def _ut_record(out: dict[str, str], name: str, status: str) -> None:
+    if name in out and _UT_RANK[out[name]] >= _UT_RANK[status]:
+        return
+    out[name] = status
+
+
+def _ut_status(tail: str) -> str | None:
+    text = tail.strip()
+    if not text:
+        return None
+    if text.startswith("skipped"):
+        return SKIPPED
+    return _UT_STATUS.get(text)
+
+
+def parse_unittest(log: str) -> dict[str, str]:
+    """{test_name -> status} from `python -m unittest -v` / Django output.
+
+    A docstring pushes the status onto the line after the name, and subtest
+    failures report on their own indented line while the parent prints none.
+    """
+    out: dict[str, str] = {}
+    if not log:
+        return out
+    pending: str | None = None
+    for raw in log.split("\n"):
+        line = raw.rstrip()
+        claimed, pending = pending, None
+        if not line.strip():
+            continue
+        head, sep, tail = line.strip().rpartition(" ... ")
+        if sep:
+            m = _UT_NAME_RE.match(head)
+            if m:
+                status = _ut_status(tail)
+                if status is not None:
+                    _ut_record(out, _ut_canonical(m["method"], m["dotted"]), status)
+            elif claimed is not None:
+                status = _ut_status(tail)
+                if status is not None:
+                    _ut_record(out, claimed, status)
+            continue
+        m = _UT_NAME_RE.match(line.strip())
+        if m:
+            pending = _ut_canonical(m["method"], m["dotted"])
+            continue
+        m = _UT_BLOCK_RE.match(line)
+        if m:
+            name = _UT_NAME_RE.match(m["name"])
+            if name:
+                _ut_record(
+                    out, _ut_canonical(name["method"], name["dotted"]), _UT_STATUS[m["status"]]
+                )
     return out
 
 
@@ -176,7 +256,46 @@ def parse_cargo_test(log: str) -> dict[str, str]:
     return out
 
 
-_JEST_FILE_RE = re.compile(r"^ ?(?:PASS|FAIL)\s+(?P<path>\S+\.(?:ts|tsx|js|jsx|mjs|cjs))\b")
+# Keep these patterns in sync with log_parsers/cargo_parser.py.
+_NEXTEST_RE = re.compile(
+    r"^\s*(?P<status>[A-Z][A-Z0-9 +/-]*?) \[\s*(?:(?P<running>>)?\s*\d+(?:\.\d+)?s)?\s*\] "
+    r"(?:\[\d+/\d+\] )?(?:\((?:\s*\d+/\d+|[-─]+)\) )?(?P<name>\S+ \S.*?)\s*$"
+)
+_NEXTEST_PASSED_RE = re.compile(
+    r"PASS|LEAK|TIMEOUT-PASS|SLOW|SLOW \+ LEAK|SLOW\+TMPASS|FLAKY \d+/\d+"
+    r"|TRY \d+ (?:PASS|LEAK|TMPASS)"
+)
+_NEXTEST_FAILED_RE = re.compile(
+    r"FAIL|FAIL \+ LEAK|LEAK-FAIL|TIMEOUT|XFAIL|ABORT|ABORT SIG \d+|SIG[A-Z0-9]+|FLKY-FL \d+/\d+"
+    r"|TRY \d+ (?!START$|SLOW$|TRMNTG$)(?:[A-Z0-9+]+|SIG \d+)"
+)
+
+
+def parse_cargo_nextest(log: str) -> dict[str, str]:
+    """{"binary-id test::name" -> status} from `cargo nextest run` output.
+
+    Lines still in progress (`SLOW [> 60.000s]`) are skipped; on retries the
+    last line for a test wins.
+    """
+    out: dict[str, str] = {}
+    if not log:
+        return out
+    for raw in log.split("\n"):
+        m = _NEXTEST_RE.match(_ANSI_RE.sub("", raw))
+        if not m or m.group("running"):
+            continue
+        status = m.group("status")
+        if status == "SKIP":
+            out[m.group("name")] = SKIPPED
+        elif _NEXTEST_PASSED_RE.fullmatch(status):
+            out[m.group("name")] = PASSED
+        elif _NEXTEST_FAILED_RE.fullmatch(status):
+            out[m.group("name")] = FAILED
+    return out
+
+
+_JEST_FILE_RE = re.compile(r"^ ?(?:PASS|FAIL)\s+(?:\S+\s+)*?(?P<path>\S+\.[mc]?[jt]sx?)(?=\s|$)")
+_JEST_FILE_MARKER_RE = re.compile(_JEST_FILE_RE.pattern, re.MULTILINE)
 _JEST_TEST_RE = re.compile(
     r"^(?P<indent>\s*)(?P<glyph>✓|√|✕|×|✗|○|◯)\s+(?P<name>.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?$"
 )
@@ -197,7 +316,53 @@ _VITEST_TEST_RE = re.compile(
     r"(?P<name>\S+ > .+?)(?P<duration> \d{1,9}ms)?"
     r"(?: \(retry x\d{1,9}\))?(?: \(repeat x\d{1,9}\))?(?: \d{1,9} MB heap used)?(?: \[[^\[\]]*\])?$"
 )
+# ✔ is log-symbols' check mark, which jest never prints; √ is ambiguous (both
+# use it on Windows), so a √-only log is recognized by mocha's epilogue.
+_MOCHA_MARKER_RE = re.compile(r"^\s*(?:\d+ passing \(|✔ )", re.MULTILINE)
+_MOCHA_EPILOGUE_RE = re.compile(r"^\s*\d+ passing \(")
+_MOCHA_FAILING_RE = re.compile(r"^\s*(?P<count>\d+) failing\b")
+_MOCHA_TEST_RE = re.compile(
+    r"^(?P<indent>\s*)(?:(?P<passed>[✔✓√])|(?P<failed>\d+\))|(?P<pending>-))\s"
+    r"(?P<name>\S.*?)(?:\s\(\d{1,9}\s?ms\))?$"
+)
 _VITEST_STATUS = {"✓": PASSED, "×": FAILED, "↓": SKIPPED, "□": SKIPPED}
+
+
+def _parse_mocha(log: str) -> dict[str, str]:
+    """{test_name -> status} from mocha's spec reporter (no file header)."""
+    out: dict[str, str] = {}
+    suites: list[tuple[int, str]] = []
+    in_epilogue = False
+    failures_left = 0
+    for raw in log.split("\n"):
+        line = raw.rstrip()
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        indent = len(line) - len(stripped)
+        if _MOCHA_EPILOGUE_RE.match(line):
+            in_epilogue, failures_left = True, 0
+            continue
+        if in_epilogue:
+            failing = _MOCHA_FAILING_RE.match(line)
+            if failing:
+                failures_left = int(failing.group("count"))
+                continue
+        m = _MOCHA_TEST_RE.match(line)
+        if m:
+            if in_epilogue:
+                if m.group("failed") and indent == 2 and failures_left > 0:
+                    failures_left -= 1
+                    continue
+                in_epilogue = False
+            status = PASSED if m.group("passed") else FAILED if m.group("failed") else SKIPPED
+            describes = [title for ind, title in suites if ind < indent]
+            out[" > ".join([*describes, m.group("name")])] = status
+            continue
+        if indent >= 2:
+            suites = [(i, t) for i, t in suites if i < indent]
+            suites.append((indent, stripped))
+    return out
 
 
 def _parse_vitest(log: str) -> dict[str, str]:
@@ -223,6 +388,8 @@ def parse_jest(log: str) -> dict[str, str]:
     log = _ANSI_RE.sub("", log)
     if _VITEST_MARKER_RE.search(log):
         return _parse_vitest(log)
+    if _MOCHA_MARKER_RE.search(log) and not _JEST_FILE_MARKER_RE.search(log):
+        return _parse_mocha(log)
     current_file: str | None = None
     describe_stack: list[tuple[int, str]] = []
     last_test_indent: int | None = None
@@ -261,8 +428,12 @@ def _detect_runner(test_cmds: str) -> str:
     joined = test_cmds.lower()
     if "pytest" in joined:
         return "pytest"
+    if re.search(r"\bunittest\b|manage\.py\s+test\b|runtests\.py", joined):
+        return "unittest"
     if re.search(r"\bgo\s+test\b", joined):
         return "go"
+    if re.search(r"\bcargo\s+nextest\b", joined):
+        return "nextest"
     if re.search(r"\bcargo\s+test\b", joined):
         return "cargo"
     if any(k in joined for k in ("jest", "mocha", "vitest", "npm test", "yarn test", "pnpm test")):
@@ -274,10 +445,14 @@ def parse_logs(runner: str, log: str) -> dict[str, str]:
     """Dispatch to the right per-runner parser. Empty dict if unknown."""
     if runner == "pytest":
         return parse_pytest(log)
+    if runner == "unittest":
+        return parse_unittest(log)
     if runner == "go":
         return parse_go_test(log)
     if runner == "cargo":
         return parse_cargo_test(log)
+    if runner == "nextest":
+        return parse_cargo_nextest(log)
     if runner == "jest":
         return parse_jest(log)
     return {}
@@ -399,7 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--log", required=True, help="captured test-run log file")
     p.add_argument("--f2p", required=True, help="JSON file: FAIL_TO_PASS test names")
     p.add_argument("--p2p", required=True, help="JSON file: PASS_TO_PASS test names")
-    p.add_argument("--runner", default="", help="pytest|go|cargo|jest (else auto-detect)")
+    p.add_argument(
+        "--runner", default="", help="pytest|unittest|go|cargo|nextest|jest (else auto-detect)"
+    )
     p.add_argument("--test-cmds", default="", help="test command string (runner auto-detect)")
     p.add_argument("--exit-code", type=int, default=1, help="test suite exit code (fallback)")
     p.add_argument("--out-dir", default="/logs/verifier", help="where to write reward.{txt,json}")
@@ -467,9 +644,11 @@ if __name__ == "__main__":
 __all__ = [
     "grade",
     "main",
+    "parse_cargo_nextest",
     "parse_cargo_test",
     "parse_go_test",
     "parse_jest",
     "parse_logs",
     "parse_pytest",
+    "parse_unittest",
 ]
