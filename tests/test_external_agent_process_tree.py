@@ -8,13 +8,21 @@ adapter's children running.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from repo2rlenv.tasksmith.author.external_agent import stop_process_tree
+from repo2rlenv.tasksmith.author import external_agent
+from repo2rlenv.tasksmith.author.external_agent import (
+    ProcessCleanupError,
+    _stop_and_wait,
+    stop_process_tree,
+)
 
 # The child starts a grandchild that touches a heartbeat file every 50 ms, then
 # waits. If the tree is really gone, the heartbeat stops advancing.
@@ -32,11 +40,11 @@ _CHILD = (
 )
 
 
-async def _start_tree(heartbeat: Path) -> asyncio.subprocess.Process:
+async def _start_tree(heartbeat: Path, child: str = _CHILD) -> asyncio.subprocess.Process:
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
-        _CHILD,
+        child,
         str(heartbeat),
         start_new_session=True,  # what run_external_agent does; ignored on Windows
     )
@@ -104,3 +112,119 @@ async def test_stopping_an_already_finished_adapter_does_not_crash(tmp_path: Pat
         stop_process_tree(process, force=True)
     except ProcessLookupError:
         pass  # the documented POSIX outcome; run_external_agent suppresses it
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal handling")
+async def test_cleanup_kills_descendant_that_ignores_term_after_parent_exits(tmp_path):
+    heartbeat = tmp_path / "heartbeat"
+    stubborn = "import signal\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n" + _GRANDCHILD
+    process = await _start_tree(heartbeat, _CHILD.replace(repr(_GRANDCHILD), repr(stubborn)))
+    try:
+        await _stop_and_wait(process)
+        assert await _heartbeat_stopped(heartbeat)
+    finally:
+        try:
+            stop_process_tree(process, force=True)
+        except ProcessLookupError:
+            pass
+
+
+def test_windows_nonzero_taskkill_is_not_success_while_parent_is_alive(monkeypatch):
+    monkeypatch.setattr(external_agent.sys, "platform", "win32")
+    monkeypatch.setattr(
+        external_agent.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=5)
+    )
+    process = SimpleNamespace(pid=12345, returncode=None)
+    with pytest.raises(ProcessCleanupError, match="taskkill failed"):
+        stop_process_tree(process, force=True)
+
+
+class _StuckProcess:
+    pid = 12345
+    returncode = None
+    killed = False
+
+    async def wait(self):
+        await asyncio.Event().wait()
+
+    async def communicate(self):
+        await asyncio.Event().wait()
+
+    def kill(self):
+        self.killed = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [False, True])
+async def test_taskkill_failures_and_final_wait_are_bounded(monkeypatch, timeout):
+    process = _StuckProcess()
+    monkeypatch.setattr(external_agent.sys, "platform", "win32")
+    monkeypatch.setattr(external_agent, "_PROCESS_GRACE_SECONDS", 0.01)
+    monkeypatch.setattr(external_agent, "_PROCESS_KILL_SECONDS", 0.01)
+    attempts = []
+
+    def taskkill(command, **kwargs):
+        attempts.append(command)
+        assert kwargs["timeout"] == 15
+        if timeout:
+            raise subprocess.TimeoutExpired(command, 15)
+        return SimpleNamespace(returncode=5)
+
+    monkeypatch.setattr(external_agent.subprocess, "run", taskkill)
+    with pytest.raises(ProcessCleanupError, match="Could not stop runtime"):
+        await asyncio.wait_for(_stop_and_wait(process), timeout=2)
+    assert len(attempts) == 2
+    assert process.killed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("original", [RuntimeError("provider failed"), asyncio.CancelledError()])
+async def test_cleanup_failure_preserves_original_error_and_removes_token(
+    monkeypatch, tmp_path, original
+):
+    process = _StuckProcess()
+
+    class FailedBridge:
+        url, token = "http://127.0.0.1:1", "test-token"
+        failure = original
+
+        def __init__(self, **kwargs):
+            self.failed = asyncio.Event()
+            self.failed.set()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def record(self, *args, **kwargs):
+            pass
+
+        def stop(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(external_agent, "AgentBridge", FailedBridge)
+    monkeypatch.setattr(external_agent, "runtime_path", lambda _: tmp_path / "runtime.mjs")
+    monkeypatch.setattr(
+        external_agent.asyncio, "create_subprocess_exec", AsyncMock(return_value=process)
+    )
+    monkeypatch.setattr(
+        external_agent, "_stop_and_wait", AsyncMock(side_effect=ProcessCleanupError("still alive"))
+    )
+    with pytest.raises(type(original)) as caught:
+        await external_agent.run_external_agent(
+            engine="pi",
+            model="anthropic/claude-sonnet-4-6",
+            system="test",
+            prompt="test",
+            budget=None,
+            tools=[],
+            handlers={},
+            trace=tmp_path / "trace.jsonl",
+            max_turns=1,
+        )
+    assert caught.value is original
+    assert any("cleanup also failed" in note for note in original.__notes__)
+    assert not list(tmp_path.rglob("runner-config.json"))
