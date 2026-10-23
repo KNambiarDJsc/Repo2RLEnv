@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -170,6 +171,31 @@ class ReconstructionOptions(PythonRepositoryProfile):
     trace_seed: int = 24
 
 
+class CodeMidasOptions(PythonRepositoryProfile):
+    """Paper-inspired construction with explicit, separately metered screening."""
+
+    test_paths: list[str] = Field(default_factory=lambda: ["test_codemidas_generated.py"])
+    pytest_args: list[str] = Field(default_factory=lambda: ["--noconftest"])
+    target: int = Field(default=5, ge=1, le=1000)
+    max_candidates: int = Field(default=12, ge=1, le=1000)
+    max_per_module: int = Field(default=2, ge=1, le=100)
+    min_implementation_statements: int = Field(default=5, ge=1, le=100)
+    seed: int = 24
+    stack_manifest: Path | None = None
+    stack_materialization: Literal["inline", "hydrated"] = "inline"
+    max_rounds: int = Field(default=3, ge=1, le=3)
+    max_turns: int = Field(default=16, ge=4, le=40)
+    candidate_budget_usd: float = Field(default=2.0, gt=0, le=20)
+    author_model: Literal["openai/gpt-6-luna", "openai/gpt-6-sol"] = "openai/gpt-6-luna"
+    reviewer_model: Literal["openai/gpt-6-luna", "openai/gpt-6-sol"] = "openai/gpt-6-sol"
+
+    @model_validator(mode="after")
+    def generated_test_contract(self):
+        if self.test_paths != ["test_codemidas_generated.py"] or self.test_selectors:
+            raise ValueError("CodeMidas runs only its independently constructed private verifier")
+        return self
+
+
 class HistoryRecipeOptions(PythonRepositoryProfile):
     target: int = Field(default=20, ge=1, le=1000)
     max_candidates: int = Field(default=80, ge=1, le=1000)
@@ -289,3 +315,22 @@ class TaskEvolutionOptions(TerminalSynthesisOptions):
         min_length=1,
     )
     variants_per_parent: int = Field(default=1, ge=1, le=20)
+
+
+class FrontierSmithOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: int = Field(default=10, ge=1, le=1000)
+    max_candidates: int = Field(default=20, ge=1, le=2000)
+    solutions: int = Field(default=3, ge=2, le=10)
+    max_repairs: int = Field(default=2, ge=0, le=4)
+    seed: int = 42
+    min_divergence: float = Field(default=0.3, ge=0, le=1)
+    min_score_spread: float = Field(default=0.001, gt=0, le=1)
+    max_tokens: int = Field(default=8192, ge=2048, le=8192)
+    rollout_tasks: int = Field(default=1, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def enough_candidates(self):
+        if self.max_candidates < self.target:
+            raise ValueError("max_candidates must be at least target")
+        return self
