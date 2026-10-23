@@ -42,7 +42,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
           # Pin a Python for the lint job — ruff itself doesn't care, this just
@@ -76,9 +76,26 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: pip install -r requirements-docs.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install site dependencies
+        working-directory: website
+        run: npm ci
       - name: Build from canonical prompts and portable metrics
-        run: mkdocs build --strict
+        working-directory: website
+        env:
+          NEXT_PUBLIC_BASE_PATH: /Repo2RLEnv
+        run: npm run build
+      - name: Check internal links and anchors
+        working-directory: website
+        env:
+          NEXT_PUBLIC_BASE_PATH: /Repo2RLEnv
+        run: |
+          node tools/check-links.mjs
+          node tools/check-tutorials.mjs
       - name: No tracked files changed during build
         run: git diff --exit-code
 
@@ -97,7 +114,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
@@ -117,7 +134,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
           enable-cache: true
@@ -172,10 +189,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
       - run: uv sync --extra tasksmith --frozen
@@ -196,7 +213,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
           python-version: "3.12"
@@ -211,8 +228,18 @@ jobs:
           /tmp/check-install/bin/repo2rlenv --version
           /tmp/check-install/bin/python tests/check_distribution.py dist
 
+      - name: Verify the Tasksmith launcher distribution
+        run: |
+          uv build packages/tasksmith --out-dir packages/tasksmith/dist
+          uv venv /tmp/check-tasksmith
+          uv pip install --python /tmp/check-tasksmith/bin/python packages/tasksmith/dist/*.whl
+          /tmp/check-tasksmith/bin/python -m unittest discover -s packages/tasksmith/tests
+          /tmp/check-tasksmith/bin/tasksmith --help
+          /tmp/check-tasksmith/bin/tasksmith run --help
+          /tmp/check-tasksmith/bin/python -m tasksmith --help
+
       - name: Upload distribution artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: repo2rlenv-dist-${{ github.sha }}
           path: dist/

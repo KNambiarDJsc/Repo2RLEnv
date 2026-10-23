@@ -109,9 +109,20 @@ uv export --all-extras --group dev --frozen --no-emit-project --no-hashes \
   --output-file /tmp/repo2rlenv-audit.txt
 uvx pip-audit --disable-pip --no-deps -r /tmp/repo2rlenv-audit.txt
 (cd src/repo2rlenv/tasksmith/author/runtimes && npm audit --package-lock-only)
+(cd website && npm audit --package-lock-only)
 ```
 
-Dependabot checks Actions, the Python lock and the coding-agent npm lock weekly.
+The npm manifests use security overrides where an upstream pin prevents a patched
+transitive dependency: `compression` for the website's `serve` command, and `toml`
+for OpenCode's Effect dependency. Zod is also overridden in the website and
+OpenCode plugin to address [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5);
+updating the runtime's direct Zod dependency alone leaves the plugin's nested
+copy vulnerable. Remove an override when the parent supports a patched version.
+Run the site build/link checks and real Pi/OpenCode mock-server
+tests after updating these locks. Pi 1.4 replaces the old runtime's nested
+shrinkwrap, allowing the repository lock to select patched dependencies.
+
+Dependabot checks Actions, Python, coding-agent runtimes and website dependencies weekly.
 Every update still needs review and passing CI. Keep Actions pinned to full
 commit SHAs with a version comment, and disable dependency caches in publishing
 jobs. Audit results cover known advisories; they are not a guarantee of safety.
@@ -132,13 +143,13 @@ That's a structured task with its own walkthrough — see [**`docs/contributing/
 
 Releases are tag-driven and handled by `.github/workflows/release.yml`. The flow:
 
-1. Bump `version` in `pyproject.toml` (e.g. `0.3.0` → `0.4.0`), run `uv lock` to update the lock's project version, and update the release notes. The `__version__` and `repo2rlenv --version` output read from package metadata, so no separate version constant needs editing.
+1. Bump `version` in `pyproject.toml` (default: a patch increment, e.g. `0.9.2` → `0.9.3`; use a minor or major bump only when explicitly requested), run `uv lock` to update the lock's project version, and update the release notes. The `__version__` and `repo2rlenv --version` output read from package metadata, so no separate version constant needs editing.
 2. Commit + push to `main`. CI confirms tests still pass.
-3. Tag: `git tag v0.4.0 && git push origin v0.4.0`.
-4. Create a GitHub Release pointing at the tag: `gh release create v0.4.0 --generate-notes` (or use the web UI).
+3. Tag: `git tag v0.9.3 && git push origin v0.9.3`.
+4. Create a GitHub Release pointing at the tag: `gh release create v0.9.3 --generate-notes` (or use the web UI).
 5. The `Release` workflow auto-fires on publication, runs the test matrix one more time against the tag, builds sdist + wheel, publishes to PyPI via `PYPI_API_TOKEN`, and attaches the dist files to the GitHub Release.
 
-If the publish step fails (auth, network, etc.), you can re-trigger it manually via `gh workflow run Release --ref v0.4.0 -f tag=v0.4.0` without needing to retag. PyPI's `skip-existing: true` flag means a partial-success rerun won't double-publish.
+If the publish step fails (auth, network, etc.), you can re-trigger it manually via `gh workflow run Release --ref v0.9.3 -f tag=v0.9.3` without needing to retag. PyPI's `skip-existing: true` flag means a partial-success rerun won't double-publish.
 
 ## Acknowledging external work
 

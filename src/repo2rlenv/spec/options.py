@@ -11,6 +11,7 @@ from repo2rlenv.spec.recipe_options import (
     CodeMidasOptions,
     DataArcOptions,
     EnvironmentRepairOptions,
+    FrontierSmithOptions,
     PRRecipeOptions,
     R2EGymOptions,
     R2EOptions,
@@ -45,7 +46,7 @@ class PRRuntimeOptions(_BaseOptions):
     until: date | None = None
     state: Literal["merged"] = "merged"
     skip_drafts: bool = True
-    require_linked_issue: bool = True
+    require_linked_issue: bool = False  # `False` to preserve historical behaviour; see https://github.com/huggingface/Repo2RLEnv/pull/185
     languages: list[str] = ["python"]
 
     # --- Validation ---
@@ -289,6 +290,7 @@ OPTIONS_REGISTRY: dict[str, type[BaseModel]] = {
 
 
 RECIPE_OPTIONS_REGISTRY: dict[str, type[BaseModel]] = {
+    "frontiersmith": FrontierSmithOptions,
     "codemidas": CodeMidasOptions,
     "scaler": ScalerOptions,
     "r2e": R2EOptions,

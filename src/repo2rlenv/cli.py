@@ -25,13 +25,26 @@ logger = logging.getLogger("repo2rlenv")
 
 
 def _load_dotenv_if_present() -> None:
-    """Load .env so OPENAI_API_KEY / ANTHROPIC_API_KEY / HF_TOKEN are available."""
-    try:
-        from dotenv import load_dotenv
+    """Load .env so OPENAI_API_KEY / ANTHROPIC_API_KEY / HF_TOKEN are available.
 
-        load_dotenv()
+    The search starts in the working directory: a bare `load_dotenv()` starts from
+    this module's install location, which misses the user's `.env` under
+    `uv tool install` or any venv outside the project.
+    """
+    try:
+        from dotenv import find_dotenv, load_dotenv
     except ImportError:
-        pass
+        return
+    try:
+        path = find_dotenv(usecwd=True)
+    except OSError:  # the working directory no longer exists
+        return
+    # Any parent of the working directory can supply the file, so a bad one must
+    # not take down every command, --help and --version included.
+    try:
+        load_dotenv(path)
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("could not load %s: %s", path, exc, extra={"markup": False})
 
 
 def _parse_pipeline_opts(items: list[str] | None) -> dict[str, Any]:
@@ -496,6 +509,35 @@ def cmd_validate(args: argparse.Namespace) -> int:
     else:
         console.error(f"{failures}/{len(task_files)} tasks failed{suffix}")
     return 0 if failures == 0 else 1
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    from repo2rlenv.pipelines.pr_diff import migrate_pr_diff_task
+
+    dataset_dir = Path(args.path).expanduser().resolve()
+    task_dirs = sorted({tf.parent for tf in dataset_dir.rglob("task.toml")})
+    if not task_dirs:
+        console.error(f"no task.toml files found under {dataset_dir}")
+        return 1
+
+    apply = getattr(args, "apply", False)
+    label = "Migrating" if apply else "Auditing (dry run — pass --apply to write)"
+    counts: dict[str, int] = {}
+    errors: list[dict[str, str]] = []
+    with console.section(f"{label} pr_diff tasks under {dataset_dir}"):
+        for task_dir in task_dirs:
+            result = migrate_pr_diff_task(task_dir, dry_run=not apply)
+            action = result["action"]
+            counts[action] = counts.get(action, 0) + 1
+            if action == "error":
+                errors.append(result)
+            elif action in ("migrated", "would_migrate"):
+                console.success(f"{result['task']}: {action}")
+        for err in errors:
+            console.error(f"{err['task']}: {err['detail']}")
+
+    console.kv(counts, title="pr_diff migration" if apply else "pr_diff migration (dry run)")
+    return 0 if not errors else 1
 
 
 class _Backend:
@@ -1102,6 +1144,22 @@ def _dispatch(argv: list[str]) -> int:
         help="--deep, plus require a usable solution/patch.diff + solve script (Repo2RLEnv tasks)",
     )
     v.set_defaults(func=cmd_validate)
+
+    # migrate
+    mg = sub.add_parser("migrate", help="Repair already-emitted tasks after a generator fix")
+    mg_sub = mg.add_subparsers(dest="migration", required=True)
+    mg_pr_diff = mg_sub.add_parser(
+        "pr-diff",
+        help=(
+            "repair pr_diff tasks emitted before #145's oracle-isolation fix "
+            "(oracle baked into the agent's own image)"
+        ),
+    )
+    mg_pr_diff.add_argument("path", help="dataset or task directory")
+    mg_pr_diff.add_argument(
+        "--apply", action="store_true", help="write the fix (default: dry-run report only)"
+    )
+    mg_pr_diff.set_defaults(func=cmd_migrate)
 
     # push
     p = sub.add_parser("push", help="Push a local dataset directory to HF Hub")
